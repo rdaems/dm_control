@@ -21,6 +21,6 @@
   </worldbody>
 
   <actuator>
-    <motor name="torque" joint="hinge" gear="1" ctrlrange="-3 3" ctrllimited="true"/>
+    <motor name="torque" joint="hinge" gear="2" ctrlrange="-3 3" ctrllimited="true"/>
   </actuator>
 </mujoco>
