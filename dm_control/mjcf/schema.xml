@@ -53,7 +53,7 @@
         <attribute name="o_margin" type="float"/>
         <attribute name="o_solref" type="array" array_type="float" array_size="2"/>
         <attribute name="o_solimp" type="array" array_type="float" array_size="5"/>
-        <attribute name="integrator" type="keyword" valid_values="Euler RK4"/>
+        <attribute name="integrator" type="keyword" valid_values="Euler RK4 implicit"/>
         <attribute name="collision" type="keyword" valid_values="all predefined dynamic"/>
         <attribute name="cone" type="keyword" valid_values="pyramidal elliptic"/>
         <attribute name="jacobian" type="keyword" valid_values="dense sparse auto"/>
@@ -84,6 +84,7 @@
             <attribute name="energy" type="keyword" valid_values="disable enable"/>
             <attribute name="fwdinv" type="keyword" valid_values="disable enable"/>
             <attribute name="sensornoise" type="keyword" valid_values="disable enable"/>
+            <attribute name="multiccd" type="keyword" valid_values="disable enable"/>
           </attributes>
         </element>
       </children>
@@ -282,6 +283,8 @@
             <attribute name="hfield" type="reference"/>
             <attribute name="mesh" type="reference"/>
             <attribute name="fitscale" type="float"/>
+            <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+            <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
             <attribute name="user" type="array" array_type="float"/>
           </attributes>
         </element>
@@ -541,6 +544,8 @@
                 <attribute name="hfield" type="reference"/>
                 <attribute name="mesh" type="reference"/>
                 <attribute name="fitscale" type="float"/>
+                <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+                <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
                 <attribute name="user" type="array" array_type="float"/>
               </attributes>
             </element>
@@ -855,6 +860,8 @@
             <attribute name="hfield" type="reference"/>
             <attribute name="mesh" type="reference"/>
             <attribute name="fitscale" type="float"/>
+            <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+            <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
             <attribute name="user" type="array" array_type="float"/>
           </attributes>
         </element>
@@ -984,6 +991,8 @@
                 <attribute name="solimp" type="array" array_type="float" array_size="5"/>
                 <attribute name="margin" type="float"/>
                 <attribute name="gap" type="float"/>
+                <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+                <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
               </attributes>
             </element>
             <element name="site">
@@ -1098,6 +1107,8 @@
                 <attribute name="hfield" type="reference"/>
                 <attribute name="mesh" type="reference"/>
                 <attribute name="fitscale" type="float"/>
+                <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+                <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
                 <attribute name="user" type="array" array_type="float"/>
               </attributes>
             </element>
@@ -1227,6 +1238,8 @@
                     <attribute name="solimp" type="array" array_type="float" array_size="5"/>
                     <attribute name="margin" type="float"/>
                     <attribute name="gap" type="float"/>
+                    <attribute name="fluidshape" type="keyword" valid_values="none ellipsoid"/>
+                    <attribute name="fluidcoef" type="array" array_type="float" array_size="5"/>
                   </attributes>
                 </element>
                 <element name="site">
@@ -1426,8 +1439,10 @@
             <attribute name="group" type="int"/>
             <attribute name="ctrllimited" type="keyword" valid_values="false true"/>
             <attribute name="forcelimited" type="keyword" valid_values="false true"/>
+            <attribute name="actlimited" type="keyword" valid_values="false true"/>
             <attribute name="ctrlrange" type="array" array_type="float" array_size="2"/>
             <attribute name="forcerange" type="array" array_type="float" array_size="2"/>
+            <attribute name="actrange" type="array" array_type="float" array_size="2"/>
             <attribute name="lengthrange" type="array" array_type="float" array_size="2"/>
             <attribute name="gear" type="array" array_type="float" array_size="6"/>
             <attribute name="cranklength" type="float"/>
@@ -1785,6 +1800,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="framequat" repeated="true" namespace="sensor">
@@ -1795,6 +1812,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="framexaxis" repeated="true" namespace="sensor">
@@ -1805,6 +1824,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="frameyaxis" repeated="true" namespace="sensor">
@@ -1815,6 +1836,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="framezaxis" repeated="true" namespace="sensor">
@@ -1825,6 +1848,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="framelinvel" repeated="true" namespace="sensor">
@@ -1835,6 +1860,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="frameangvel" repeated="true" namespace="sensor">
@@ -1845,6 +1872,8 @@
             <attribute name="user" type="array" array_type="float"/>
             <attribute name="objtype" type="keyword" required="true" valid_values="body xbody geom site camera"/>
             <attribute name="objname" type="reference" required="true" reference_namespace="attrib:objtype"/>
+            <attribute name="reftype" type="keyword" required="false" valid_values="body xbody geom site camera"/>
+            <attribute name="refname" type="reference" required="false" reference_namespace="attrib:reftype"/>
           </attributes>
         </element>
         <element name="framelinacc" repeated="true" namespace="sensor">

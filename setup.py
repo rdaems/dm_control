@@ -23,6 +23,7 @@ import platform
 import subprocess
 import sys
 
+import mujoco
 from setuptools import find_packages
 from setuptools import setup
 from setuptools.command import install
@@ -41,6 +42,7 @@ HEADER_FILENAMES = [
     'mjdata.h',
     'mjmodel.h',
     'mjrender.h',
+    'mjtnum.h',
     'mjui.h',
     'mjvisualize.h',
     'mjxmacro.h',
@@ -52,28 +54,7 @@ def _initialize_mjbindings_options(cmd_instance):
   """Set default values for options relating to `build_mjbindings`."""
   # A default value must be assigned to each user option here.
   cmd_instance.inplace = 0
-
-  candidate_paths = []
-  if PLATFORM == 'Linux':
-    candidate_paths.append(os.path.expanduser('~/.mujoco/mujoco-2.1.1/include'))
-    candidate_paths.append(os.path.expanduser('~/.mujoco/include'))
-  elif PLATFORM == 'Darwin':
-    framework_path = 'MuJoCo.Framework/Headers'
-    candidate_paths.append(
-        os.path.join(os.path.expanduser('~/.mujoco'), framework_path))
-    candidate_paths.append(os.path.join(
-        '/Applications/MuJoCo.App/Contents/Frameworks', framework_path))
-  elif PLATFORM == 'Windows':
-    candidate_paths.append(os.path.join(
-        os.environ['HOMEDRIVE'], os.environ['HOMEPATH'], 'MuJoCo\\include'))
-    candidate_paths.append(os.path.join(
-        os.environ['PUBLIC'], 'MuJoCo\\include'))
-
-  cmd_instance.headers_dir = ''
-  for path in candidate_paths:
-    if os.path.isdir(path):
-      cmd_instance.headers_dir = path
-      break
+  cmd_instance.headers_dir = mujoco.HEADERS_DIR
 
 
 def _finalize_mjbindings_options(cmd_instance):
@@ -192,23 +173,37 @@ def find_data_files(package_dir, patterns, excludes=()):
 
 setup(
     name='dm_control',
-    version='0.0.425341097',
+    version='1.0.3.post1',
     description='Continuous control environments and MuJoCo Python bindings.',
+    long_description="""
+# `dm_control`: DeepMind Infrastructure for Physics-Based Simulation.
+
+DeepMind's software stack for physics-based simulation and Reinforcement
+Learning environments, using MuJoCo physics.
+
+An **introductory tutorial** for this package is available as a Colaboratory
+notebook: [Open In Google Colab](https://colab.research.google.com/github/deepmind/dm_control/blob/master/tutorial.ipynb).
+""",
+    long_description_content_type='text/markdown',
     author='DeepMind',
-    license='Apache License, Version 2.0',
+    author_email='mujoco@deepmind.com',
+    url='https://github.com/deepmind/dm_control',
+    license='Apache License 2.0',
+    classifiers=[
+        'License :: OSI Approved :: Apache Software License',
+    ],
     keywords='machine learning control physics MuJoCo AI',
-    python_requires='>=3.7, <3.10',
+    python_requires='>=3.7',
     install_requires=[
         'absl-py>=0.7.0',
         'dm-env',
         'dm-tree != 0.1.2',
-        'future',
         'glfw',
-        'h5py',
         'labmaze',
         'lxml',
+        'mujoco >= 2.2.0',
         'numpy >= 1.9.0',
-        'protobuf >= 3.15.6',
+        'protobuf >= 3.20.1',
         'pyopengl >= 3.1.4',
         'pyparsing < 3.0.0',
         'requests',
@@ -216,10 +211,13 @@ setup(
         'scipy',
         'tqdm',
     ],
+    extras_require={
+        'HDF5': ['h5py'],
+    },
     tests_require=[
         'mock',
         'nose',
-        'pillow>=7.1.0',  # https://github.com/advisories/GHSA-8843-m7mw-mxqm
+        'pillow>=9.0.1',  # https://github.com/advisories/GHSA-8vj2-vxx3-667w
     ],
     test_suite='nose.collector',
     packages=find_packages(),
@@ -227,8 +225,10 @@ setup(
         'dm_control':
             find_data_files(
                 package_dir='dm_control',
-                patterns=['*.amc', '*.msh', '*.png', '*.skn', '*.stl', '*.xml',
-                          '*.textproto', '*.h5'],
+                patterns=[
+                    '*.amc', '*.msh', '*.png', '*.skn', '*.stl', '*.xml',
+                    '*.textproto', '*.h5'
+                ],
                 excludes=[
                     '*/dog_assets/extras/*',
                     '*/kinova/meshes/*',  # Exclude non-decimated meshes.

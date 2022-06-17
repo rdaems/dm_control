@@ -32,71 +32,58 @@ complex control tasks:
 
 -   [`dm_control.locomotion.soccer`]: Multi-agent soccer tasks.
 
-If you use this package, please cite our accompanying [tech report]:
+If you use this package, please cite our accompanying [publication]:
 
 ```
-@misc{tassa2020dmcontrol,
-    title={dm_control: Software and Tasks for Continuous Control},
-    author={Yuval Tassa and Saran Tunyasuvunakool and Alistair Muldal and
-            Yotam Doron and Siqi Liu and Steven Bohez and Josh Merel and
-            Tom Erez and Timothy Lillicrap and Nicolas Heess},
-    year={2020},
-    eprint={2006.12983},
-    archivePrefix={arXiv},
-    primaryClass={cs.RO}
+@article{tunyasuvunakool2020,
+         title = {dm_control: Software and tasks for continuous control},
+         journal = {Software Impacts},
+         volume = {6},
+         pages = {100022},
+         year = {2020},
+         issn = {2665-9638},
+         doi = {https://doi.org/10.1016/j.simpa.2020.100022},
+         url = {https://www.sciencedirect.com/science/article/pii/S2665963820300099},
+         author = {Saran Tunyasuvunakool and Alistair Muldal and Yotam Doron and
+                   Siqi Liu and Steven Bohez and Josh Merel and Tom Erez and
+                   Timothy Lillicrap and Nicolas Heess and Yuval Tassa},
 }
 ```
 
-## Requirements and Installation
+## Installation
 
-`dm_control` is regularly tested on Ubuntu 16.04 against the following Python
-versions:
+Install `dm_control` from PyPI by running
 
-*   3.7
-*   3.8
-*   3.9
+```sh
+pip install dm_control
+```
 
-Various people have been successful in getting `dm_control` to work on other
-Linux distros, macOS, and Windows. We do not provide active support for these,
-but will endeavour to answer questions on a best-effort basis.
-
-Follow these steps to install `dm_control`:
-
-1.  Download MuJoCo 2.1.1 from the
-    [Releases page on the MuJoCo GitHub repository]. MuJoCo must be installed
-    before `dm_control`, since `dm_control`'s install script generates Python
-    [`ctypes`] bindings based on MuJoCo's header files. By default, `dm_control`
-    assumes that MuJoCo is installed via the following instructions:
-
-    -   On Linux, extract the tarball into `~/.mujoco`.
-    -   On Windows, extract the zip archive into either `%HOMEPATH%\MuJoCo` or
-        `%PUBLIC%\MuJoCo`.
-    -   On macOS, either place `MuJoCo.app` into `/Applications`, or place
-        `MuJoCo.Framework` into `~/.mujoco`.
-
-2.  Install the `dm_control` Python package by running `pip install dm_control`.
-    We recommend `pip install`ing into a `virtualenv`, or with the `--user` flag
-    to avoid interfering with system packages. At installation time,
-    `dm_control` looks for the MuJoCo headers at the paths described in Step 1
-    by default, however this path can be configured with the `headers-dir`
-    command line argument.
-
-3.  If the shared library provided by MuJoCo (i.e. `libmujoco.so.2.1.1` or
-    `libmujoco.2.1.1.dylib` or `mujoco.dll`) is installed at a non-default path,
-    specify its location using the `MJLIB_PATH` environment variable. This
-    environment variable should be set to the full path to the library file
-    itself, e.g. `export MJLIB_PATH=/path/to/libmujoco.so.2.1.1`.
+> **Note**: **`dm_control` cannot be installed in "editable" mode** (i.e. `pip
+> install -e`).
+>
+> While `dm_control` has been largely updated to use the pybind11-based bindings
+> provided via the `mujoco` package, at this time it still relies on some legacy
+> components that are automatically generated from MuJoCo header files in a way
+> that is incompatible with editable mode. Attempting to install `dm_control` in
+> editable mode will result in import errors like:
+>
+> ```
+> ImportError: cannot import name 'constants' from partially initialized module 'dm_control.mujoco.wrapper.mjbindings' ...
+> ```
+>
+> The solution is to `pip uninstall dm_control` and then reinstall it without
+> the `-e` flag.
 
 ## Versioning
 
-`dm_control` is released on a rolling basis: the latest commit on the `master`
-branch of our GitHub repository represents our latest release. Our Python
-package is versioned `0.0.N`, where `N` is the number that appears in the
-`PiperOrigin-RevId` field of the commit message. We always ensure that `N`
-strictly increases between a parent commit and its children. We do not upload
-all versions to PyPI, and occasionally the latest version on PyPI may lag behind
-the latest commit on GitHub. Should this happen, you can still install the
-newest version available by running `pip install
+Starting from version 1.0.0, we adopt semantic versioning.
+
+Prior to version 1.0.0, the `dm_control` Python package was versioned `0.0.N`,
+where `N` was an internal revision number that increased by an arbitrary amount
+at every single Git commit.
+
+If you want to install an unreleased version of `dm_control` directly from our
+repository, you can do so by running `pip install
 git+git://github.com/deepmind/dm_control.git`.
 
 ## Rendering
@@ -141,7 +128,7 @@ setting the environment variable `EGL_DEVICE_ID=` to the target GPU ID.
 [EXT_platform_device]: https://www.khronos.org/registry/EGL/extensions/EXT/EGL_EXT_platform_device.txt
 [Releases page on the MuJoCo GitHub repository]: https://github.com/deepmind/mujoco/releases
 [MuJoCo website]: https://mujoco.org/
-[tech report]: https://arxiv.org/abs/2006.12983
+[publication]: https://doi.org/10.1016/j.simpa.2020.100022
 [`ctypes`]: https://docs.python.org/3/library/ctypes.html
 [`dm_control.mjcf`]: dm_control/mjcf/README.md
 [`dm_control.mujoco`]: dm_control/mujoco/README.md

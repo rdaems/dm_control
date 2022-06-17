@@ -15,22 +15,19 @@
 
 """Tests for `engine`."""
 
+import copy
 import pickle
-import unittest
 
 from absl.testing import absltest
 from absl.testing import parameterized
 from dm_control.mujoco import engine
 from dm_control.mujoco import wrapper
 from dm_control.mujoco.testing import assets
-from dm_control.mujoco.wrapper import mjbindings
-from dm_control.mujoco.wrapper.mjbindings import constants
 from dm_control.mujoco.wrapper.mjbindings import enums
 from dm_control.rl import control
 import mock
+import mujoco
 import numpy as np
-
-mjlib = mjbindings.mjlib
 
 MODEL_PATH = assets.get_path('cartpole.xml')
 MODEL_WITH_ASSETS = assets.get_contents('model_with_assets.xml')
@@ -105,7 +102,7 @@ class MujocoEngineTest(parameterized.TestCase):
     obj_type_decor = enums.mjtObj.mjOBJ_UNKNOWN  # Decor object type
     scene_options = wrapper.MjvOption()
     if enable_geom_frame_rendering:
-      scene_options.frame = wrapper.mjbindings.enums.mjtFrame.mjFRAME_GEOM
+      scene_options.frame = mujoco.mjtFrame.mjFRAME_GEOM
     pixels = physics.render(height=200, width=200, camera_id='top',
                             segmentation=True, scene_option=scene_options)
 
@@ -149,7 +146,6 @@ class MujocoEngineTest(parameterized.TestCase):
   def testSceneOption(self):
     height, width = 480, 640
     scene_option = wrapper.MjvOption()
-    mjlib.mjv_defaultOption(scene_option.ptr)
 
     # Render geoms as semi-transparent.
     scene_option.flags[enums.mjtVisFlag.mjVIS_TRANSPARENT] = 1
@@ -382,21 +378,6 @@ class MujocoEngineTest(parameterized.TestCase):
         MODEL_WITH_ASSETS, assets=ASSETS)
     physics.reload_from_xml_string(MODEL_WITH_ASSETS, assets=ASSETS)
 
-  def testFree(self):
-    def mock_free(obj):
-      return mock.patch.object(obj, 'free', wraps=obj.free)
-
-    with mock_free(self._physics.model) as mock_free_model:
-      with mock_free(self._physics.data) as mock_free_data:
-        with mock_free(self._physics.contexts.mujoco) as mock_free_mjrcontext:
-          self._physics.free()
-
-    mock_free_model.assert_called_once()
-    mock_free_data.assert_called_once()
-    mock_free_mjrcontext.assert_called_once()
-    self.assertIsNone(self._physics.model.ptr)
-    self.assertIsNone(self._physics.data.ptr)
-
   @parameterized.parameters(*enums.mjtWarning._fields[:-1])
   def testDivergenceException(self, warning_name):
     warning_enum = getattr(enums.mjtWarning, warning_name)
@@ -418,10 +399,10 @@ class MujocoEngineTest(parameterized.TestCase):
       self._physics.data.qpos[0] = bad_value
     with self.assertRaises(control.PhysicsError):
       with self._physics.check_invalid_state():
-        mjlib.mj_checkPos(self._physics.model.ptr, self._physics.data.ptr)
+        mujoco.mj_checkPos(self._physics.model.ptr, self._physics.data.ptr)
     self._physics.reset()
     with self._physics.check_invalid_state():
-      mjlib.mj_checkPos(self._physics.model.ptr, self._physics.data.ptr)
+      mujoco.mj_checkPos(self._physics.model.ptr, self._physics.data.ptr)
 
   def testNanControl(self):
     with self._physics.reset_context():
@@ -461,6 +442,7 @@ class MujocoEngineTest(parameterized.TestCase):
 
   @parameterized.named_parameters(
       ('_copy', lambda x: x.copy()),
+      ('_deepcopy', copy.deepcopy),
       ('_pickle_and_unpickle', lambda x: pickle.loads(pickle.dumps(x))),
   )
   def testCopyOrPicklePhysics(self, func):
@@ -533,34 +515,46 @@ class MujocoEngineTest(parameterized.TestCase):
     physics = engine.Physics.from_xml_string(xml)
     spec = engine.action_spec(physics)
     self.assertEqual(float, spec.dtype)
-    np.testing.assert_array_equal(spec.minimum, [-constants.mjMAXVAL, -1.0])
-    np.testing.assert_array_equal(spec.maximum, [constants.mjMAXVAL, 2.0])
+    np.testing.assert_array_equal(spec.minimum, [-mujoco.mjMAXVAL, -1.0])
+    np.testing.assert_array_equal(spec.maximum, [mujoco.mjMAXVAL, 2.0])
 
-  def _check_valid_rotation_matrix(self, data_field_name):
-    name = 'foo'
-    quat = '0.5 0.7 0 0'  # Not normalized.
-    xml_string = """
-    <mujoco>
-      <worldbody>
-        <body name='{name}' quat='{quat}'/>
-        <camera name='{name}' quat='{quat}'/>
-        <geom name='{name}' quat='{quat}' size='0.1'/>
-        <site name='{name}' quat='{quat}' size='0.1'/>
-      </worldbody>
-    </mujoco>
-    """.format(name=name, quat=quat)
-    physics = engine.Physics.from_xml_string(xml_string)
-    rotation_matrix = getattr(physics.named.data, data_field_name)[name]
-    self.assertAlmostEqual(np.linalg.det(rotation_matrix.reshape(3, 3)), 1)
+  def testNstep(self):
+    # Make initial state.
+    with self._physics.reset_context():
+      self._physics.data.qvel[0] = 1
+      self._physics.data.qvel[1] = 1
+    initial_state = self._physics.get_state()
 
-  @parameterized.parameters(['xmat', 'geom_xmat', 'site_xmat'])
-  def testValidRotationMatrixIfQuatNotNormalizedInXML(self, field_name):
-    self._check_valid_rotation_matrix(field_name)
+    # step() 4 times.
+    for _ in range(4):
+      self._physics.step()
+    for_loop_state = self._physics.get_state()
 
-  # TODO(b/123918714): Update this once the bug has been fixed in MuJoCo.
-  @unittest.expectedFailure
-  def testValidCameraRotationMatrixIfQuatNotNormalizedInXML(self):
-    self._check_valid_rotation_matrix('cam_xmat')
+    # Reset state, call step(4).
+    with self._physics.reset_context():
+      self._physics.set_state(initial_state)
+    self._physics.step(4)
+    nstep_state = self._physics.get_state()
+
+    np.testing.assert_array_equal(for_loop_state, nstep_state)
+
+    # Repeat test with with RK4 integrator:
+    self._physics.model.opt.integrator = enums.mjtIntegrator.mjINT_RK4
+
+    # step() 4 times.
+    with self._physics.reset_context():
+      self._physics.set_state(initial_state)
+    for _ in range(4):
+      self._physics.step()
+    for_loop_state_rk4 = self._physics.get_state()
+
+    # Reset state, call step(4).
+    with self._physics.reset_context():
+      self._physics.set_state(initial_state)
+    self._physics.step(4)
+    nstep_state_rk4 = self._physics.get_state()
+
+    np.testing.assert_array_equal(for_loop_state_rk4, nstep_state_rk4)
 
 if __name__ == '__main__':
   absltest.main()

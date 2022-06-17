@@ -1,4 +1,4 @@
-# Copyright 2017 The dm_control Authors.
+# Copyright 2022 The dm_control Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,20 +13,19 @@
 # limitations under the License.
 # ============================================================================
 
-"""Assets used for testing the MuJoCo bindings."""
+"""Aliases for the mujoco library, provided for backwards compatibility.
 
-import os
+New code should import mujoco directly, instead of accessing these constants or
+mjlib through this module.
+"""
+import mujoco
 
-from dm_control.utils import io as resources
+mjlib = mujoco
 
-_ASSETS_DIR = os.path.dirname(__file__)
-
-
-def get_contents(filename):
-  """Returns the contents of an asset as a string."""
-  return resources.GetResource(os.path.join(_ASSETS_DIR, filename), mode='rb')
-
-
-def get_path(filename):
-  """Returns the path to an asset."""
-  return resources.GetResourceFilename(os.path.join(_ASSETS_DIR, filename))
+mjDISABLESTRING = mujoco.mjDISABLESTRING
+mjENABLESTRING = mujoco.mjENABLESTRING
+mjTIMERSTRING = mujoco.mjTIMERSTRING
+mjLABELSTRING = mujoco.mjLABELSTRING
+mjFRAMESTRING = mujoco.mjFRAMESTRING
+mjVISSTRING = mujoco.mjVISSTRING
+mjRNDSTRING = mujoco.mjRNDSTRING

@@ -27,8 +27,6 @@ MODEL = assets.get_contents('cartpole.xml')
 MODEL_NO_NAMES = assets.get_contents('cartpole_no_names.xml')
 MODEL_3RD_ORDER_ACTUATORS = assets.get_contents(
     'model_with_third_order_actuators.xml')
-MODEL_INCORRECT_ACTUATOR_ORDER = assets.get_contents(
-    'model_incorrect_actuator_order.xml')
 
 FIELD_REPR = {
     'act': ('FieldIndexer(act):\n'
@@ -169,15 +167,6 @@ class MujocoIndexTest(parameterized.TestCase):
     # indexing.
     np.testing.assert_array_equal(field[numeric_key], indexer[key])
 
-  def testIncorrectActuatorOrder(self):
-    # Our indexing of third-order actuators relies on an undocumented
-    # requirement of MuJoCo's compiler that all third-order actuators come after
-    # all second-order actuators. This test ensures that the rule still holds
-    # (e.g. in future versions of MuJoCo).
-    with self.assertRaisesRegex(
-        wrapper.Error, '2nd-order actuators must come before 3rd-order'):
-      wrapper.MjModel.from_xml_string(MODEL_INCORRECT_ACTUATOR_ORDER)
-
   @parameterized.parameters(
       # (field name, named index key)
       ('xpos', 'pole'),
@@ -293,11 +282,13 @@ class MujocoIndexTest(parameterized.TestCase):
     index.struct_indexer(model, 'mjmodel', size_to_axis_indexer)
     index.struct_indexer(data, 'mjdata', size_to_axis_indexer)
 
-  @parameterized.parameters(
+  # pylint: disable=undefined-variable
+  @parameterized.parameters([
       name for name in dir(np.ndarray)
       if not name.startswith('_')  # Exclude 'private' attributes
       and name not in ('ctypes', 'flat')  # Can't compare via identity/equality
-  )
+  ])
+  # pylint: enable=undefined-variable
   def testFieldIndexerDelegatesNDArrayAttributes(self, name):
     field = self._data.xpos
     field_indexer = self._data_indexers.xpos
