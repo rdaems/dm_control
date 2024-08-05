@@ -15,15 +15,15 @@
 
 """Install script for setuptools."""
 
-from distutils import cmd
-from distutils import log
 import fnmatch
+import logging
 import os
 import platform
 import subprocess
 import sys
 
 import mujoco
+import setuptools
 from setuptools import find_packages
 from setuptools import setup
 from setuptools.command import install
@@ -69,15 +69,18 @@ def _finalize_mjbindings_options(cmd_instance):
   cmd_instance.header_paths = ' '.join(header_paths)
 
 
-class BuildMJBindingsCommand(cmd.Command):
+class BuildMJBindingsCommand(setuptools.Command):
   """Runs `autowrap.py` to generate the low-level ctypes bindings for MuJoCo."""
+
   description = __doc__
   user_options = [
       # The format is (long option, short option, description).
-      ('headers-dir=', None,
-       'Path to directory containing MuJoCo headers.'),
-      ('inplace=', None,
-       'Place generated files in source directory rather than `build-lib`.'),
+      ('headers-dir=', None, 'Path to directory containing MuJoCo headers.'),
+      (
+          'inplace=',
+          None,
+          'Place generated files in source directory rather than `build-lib`.',
+      ),
   ]
   boolean_options = ['inplace']
 
@@ -99,9 +102,9 @@ class BuildMJBindingsCommand(cmd.Command):
         sys.executable or 'python',
         AUTOWRAP_PATH,
         '--header_paths={}'.format(self.header_paths),
-        '--output_dir={}'.format(output_dir)
+        '--output_dir={}'.format(output_dir),
     ]
-    self.announce('Running command: {}'.format(command), level=log.DEBUG)
+    self.announce('Running command: {}'.format(command), level=logging.DEBUG)
     try:
       # Prepend the current directory to $PYTHONPATH so that internal imports
       # in `autowrap` can succeed before we've installed anything.
@@ -119,9 +122,11 @@ class InstallCommand(install.install):
   """Runs 'build_mjbindings' before installation."""
 
   user_options = (
-      install.install.user_options + BuildMJBindingsCommand.user_options)
+      install.install.user_options + BuildMJBindingsCommand.user_options
+  )
   boolean_options = (
-      install.install.boolean_options + BuildMJBindingsCommand.boolean_options)
+      install.install.boolean_options + BuildMJBindingsCommand.boolean_options
+  )
 
   def initialize_options(self):
     install.install.initialize_options(self)
@@ -132,9 +137,7 @@ class InstallCommand(install.install):
     _finalize_mjbindings_options(self)
 
   def run(self):
-    self.reinitialize_command('build_mjbindings',
-                              inplace=self.inplace,
-                              headers_dir=self.headers_dir)
+    self.reinitialize_command('build_mjbindings')
     self.run_command('build_mjbindings')
     install.install.run(self)
 
@@ -171,9 +174,10 @@ def find_data_files(package_dir, patterns, excludes=()):
           paths.add(full_path)
   return list(paths)
 
+
 setup(
     name='dm_control',
-    version='1.0.3.post1',
+    version='1.0.21',
     description='Continuous control environments and MuJoCo Python bindings.',
     long_description="""
 # `dm_control`: DeepMind Infrastructure for Physics-Based Simulation.
@@ -182,18 +186,18 @@ DeepMind's software stack for physics-based simulation and Reinforcement
 Learning environments, using MuJoCo physics.
 
 An **introductory tutorial** for this package is available as a Colaboratory
-notebook: [Open In Google Colab](https://colab.research.google.com/github/deepmind/dm_control/blob/master/tutorial.ipynb).
+notebook: [Open In Google Colab](https://colab.research.google.com/github/google-deepmind/dm_control/blob/main/tutorial.ipynb).
 """,
     long_description_content_type='text/markdown',
     author='DeepMind',
     author_email='mujoco@deepmind.com',
-    url='https://github.com/deepmind/dm_control',
+    url='https://github.com/google-deepmind/dm_control',
     license='Apache License 2.0',
     classifiers=[
         'License :: OSI Approved :: Apache Software License',
     ],
     keywords='machine learning control physics MuJoCo AI',
-    python_requires='>=3.7',
+    python_requires='>=3.8',
     install_requires=[
         'absl-py>=0.7.0',
         'dm-env',
@@ -201,11 +205,11 @@ notebook: [Open In Google Colab](https://colab.research.google.com/github/deepmi
         'glfw',
         'labmaze',
         'lxml',
-        'mujoco >= 2.2.0',
+        'mujoco >= 3.2.0',
         'numpy >= 1.9.0',
-        'protobuf >= 3.20.1',
+        'protobuf >= 3.19.4',  # TensorFlow requires protobuf<3.20 (b/182876485)
         'pyopengl >= 3.1.4',
-        'pyparsing < 3.0.0',
+        'pyparsing >= 3.0.0',
         'requests',
         'setuptools!=50.0.0',  # https://github.com/pypa/setuptools/issues/2350
         'scipy',
@@ -217,22 +221,28 @@ notebook: [Open In Google Colab](https://colab.research.google.com/github/deepmi
     tests_require=[
         'mock',
         'nose',
-        'pillow>=9.0.1',  # https://github.com/advisories/GHSA-8vj2-vxx3-667w
+        'pillow>=10.2.0',
     ],
     test_suite='nose.collector',
     packages=find_packages(),
     package_data={
-        'dm_control':
-            find_data_files(
-                package_dir='dm_control',
-                patterns=[
-                    '*.amc', '*.msh', '*.png', '*.skn', '*.stl', '*.xml',
-                    '*.textproto', '*.h5'
-                ],
-                excludes=[
-                    '*/dog_assets/extras/*',
-                    '*/kinova/meshes/*',  # Exclude non-decimated meshes.
-                ]),
+        'dm_control': find_data_files(
+            package_dir='dm_control',
+            patterns=[
+                '*.amc',
+                '*.msh',
+                '*.png',
+                '*.skn',
+                '*.stl',
+                '*.xml',
+                '*.textproto',
+                '*.h5',
+            ],
+            excludes=[
+                '*/dog_assets/extras/*',
+                '*/kinova/meshes/*',  # Exclude non-decimated meshes.
+            ],
+        ),
     },
     cmdclass={
         'build_mjbindings': BuildMJBindingsCommand,

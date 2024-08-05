@@ -63,7 +63,7 @@ _PREV_LABELING_MODE = (user_input.KEY_F7, user_input.MOD_SHIFT)
 _NEXT_LABELING_MODE = user_input.KEY_F7
 _PRINT_CAMERA = user_input.KEY_F11
 _VISUALIZATION_FLAGS = user_input.Range([
-    ord(functions.mjVISSTRING[i][2])
+    ord(functions.mjVISSTRING[i][2]) if functions.mjVISSTRING[i][2] else 0
     for i in range(0, mujoco.mjtVisFlag.mjNVISFLAG)
 ])
 _GEOM_GROUPS = user_input.Range(
@@ -73,7 +73,7 @@ _SITE_GROUPS = user_input.Range([
     for i in range(min(_NUM_GROUP_KEYS, mujoco.mjNGROUP))
 ])
 _RENDERING_FLAGS = user_input.Range([
-    ord(functions.mjRNDSTRING[i][2])
+    ord(functions.mjRNDSTRING[i][2]) if functions.mjRNDSTRING[i][2] else 0
     for i in range(0, mujoco.mjtRndFlag.mjNRNDFLAG)
 ])
 
@@ -95,7 +95,7 @@ class Viewer:
   """Viewport displaying the contents of a physics world."""
 
   def __init__(self, viewport, mouse, keyboard, camera_settings=None,
-               zoom_factor=_FULL_SCENE_ZOOM_FACTOR):
+               zoom_factor=_FULL_SCENE_ZOOM_FACTOR, scene_callback=None):
     """Instance initializer.
 
     Args:
@@ -104,6 +104,9 @@ class Viewer:
       keyboard: A keyboard device.
       camera_settings: Properties of the scene MjvCamera.
       zoom_factor: Initial scale factor for zooming into the scene.
+      scene_callback: Scene callback.
+        This is a callable of the form: `my_callable(MjModel, MjData, MjvScene)`
+        that gets applied to every rendered scene.
     """
     self._viewport = viewport
     self._mouse = mouse
@@ -119,6 +122,7 @@ class Viewer:
     self._free_camera = None
     self._camera_select = None
     self._zoom_factor = zoom_factor
+    self._scene_callback = scene_callback
 
   def __del__(self):
     del self._camera
@@ -136,8 +140,12 @@ class Viewer:
       touchpad: A boolean, use input dedicated to touchpad.
     """
     self._camera = renderer.SceneCamera(
-        physics.model, physics.data, self._render_settings,
-        settings=self._camera_settings, zoom_factor=self._zoom_factor)
+        physics.model,
+        physics.data,
+        self._render_settings,
+        settings=self._camera_settings,
+        zoom_factor=self._zoom_factor,
+        scene_callback=self._scene_callback)
 
     self._manipulator = ManipulationController(
         self._viewport, self._camera, self._mouse)
@@ -211,7 +219,7 @@ class Viewer:
     self._input_map.bind(self._free_camera.set_rotate_mode, _ROTATE_CAMERA)
     self._input_map.bind(self._free_camera.center, _CENTER_CAMERA)
     self._input_map.bind(self._free_camera.track, _TRACK_OBJECT)
-    self._input_map.bind(self._free_camera.free_look, _FREE_LOOK)
+    self._input_map.bind(self._camera_select.escape, _FREE_LOOK)
     self._input_map.bind(self._manipulator.select, _SELECT_OBJECT)
     self._input_map.bind_plane(self._manipulator.on_move)
 
@@ -302,6 +310,11 @@ class CameraSelector:
     self._camera_idx += 1
     if not self._model.ncam or self._camera_idx >= self._model.ncam:
       self._camera_idx = -1
+    self._commit_selection()
+
+  def escape(self) -> None:
+    """Unconditionally switches to the free camera."""
+    self._camera_idx = -1
     self._commit_selection()
 
   def _commit_selection(self):

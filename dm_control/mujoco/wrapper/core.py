@@ -18,7 +18,7 @@
 import contextlib
 import copy
 import ctypes
-import threading
+from typing import Union
 import weakref
 
 from absl import logging
@@ -31,16 +31,11 @@ import numpy as np
 
 # Unused internal import: resources.
 
-_NULL = b"\00"
 _FAKE_BINARY_FILENAME = "model.mjb"
 
 _CONTACT_ID_OUT_OF_RANGE = (
     "`contact_id` must be between 0 and {max_valid} (inclusive), got: {actual}."
 )
-
-# Global cache used to store finalizers for freeing ctypes pointers.
-# Contains {pointer_address: weakref_object} pairs.
-_FINALIZERS = {}
 
 
 class Error(Exception):
@@ -51,9 +46,6 @@ class Error(Exception):
 if mujoco.mjVERSION_HEADER != mujoco.mj_version():
   raise Error("MuJoCo library version ({0}) does not match header version "
               "({1})".format(mujoco.mjVERSION_HEADER, mujoco.mj_version()))
-
-_REGISTERED = False
-_REGISTRATION_LOCK = threading.Lock()
 
 # This is used to keep track of the `MJMODEL` pointer that was most recently
 # loaded by `_get_model_ptr_from_xml`. Only this model can be saved to XML.
@@ -244,7 +236,7 @@ def _get_model_ptr_from_binary(binary_path=None, byte_string=None):
 class _MjModelMeta(type):
   """Metaclass which allows MjModel below to delegate to mujoco.MjModel."""
 
-  def __new__(cls, name, bases, dct):
+  def __new__(mcs, name, bases, dct):
     for attr in dir(mujoco.MjModel):
       if not attr.startswith("_"):
         if attr not in dct:
@@ -254,7 +246,7 @@ class _MjModelMeta(type):
               lambda self, value, attr=attr: setattr(self._model, attr, value))
           # pylint: enable=protected-access
           dct[attr] = property(fget, fset)
-    return super().__new__(cls, name, bases, dct)
+    return super().__new__(mcs, name, bases, dct)
 
 
 class MjModel(metaclass=_MjModelMeta):
@@ -435,7 +427,7 @@ class MjModel(metaclass=_MjModelMeta):
 class _MjDataMeta(type):
   """Metaclass which allows MjData below to delegate to mujoco.MjData."""
 
-  def __new__(cls, name, bases, dct):
+  def __new__(mcs, name, bases, dct):
     for attr in dir(mujoco.MjData):
       if not attr.startswith("_"):
         if attr not in dct:
@@ -444,7 +436,7 @@ class _MjDataMeta(type):
           fset = lambda self, value, attr=attr: setattr(self._data, attr, value)
           # pylint: enable=protected-access
           dct[attr] = property(fget, fset)
-    return super().__new__(cls, name, bases, dct)
+    return super().__new__(mcs, name, bases, dct)
 
 
 class MjData(metaclass=_MjDataMeta):
@@ -456,31 +448,35 @@ class MjData(metaclass=_MjDataMeta):
 
   _HAS_DYNAMIC_ATTRIBUTES = True
 
-  def __init__(self, model):
-    """Construct a new MjData instance.
+  def __init__(self, model_or_data: Union[MjModel, mujoco.MjData]):
+    """Constructs a new MjData instance.
 
     Args:
-      model: An MjModel instance.
+      model_or_data: dm_control.mujoco.wrapper.MjModel instance, or
+          mujoco.MjData.
     """
-    self._model = model
-    self._data = mujoco.MjData(model._model)
+    if isinstance(model_or_data, MjModel):
+      self._model = model_or_data
+      self._data = mujoco.MjData(model_or_data._model)
+    elif isinstance(model_or_data, mujoco.MjData):
+      self._data = model_or_data
+      self._model = MjModel(self._data.model)
 
   def __getstate__(self):
-    return (self._model, self._data)
+    return self._data
 
   def __setstate__(self, state):
-    self._model, self._data = state
+    self._data = state
+    self._model = MjModel(self._data.model)
 
   def __copy__(self):
     # This makes a shallow copy that shares the same parent MjModel instance.
     return self._make_copy(share_model=True)
 
   def _make_copy(self, share_model):
-    # TODO(nimrod): Avoid allocating a new MjData just to replace it.
-    new_obj = self.__class__(
-        self._model if share_model else copy.copy(self._model))
-    super(self.__class__, new_obj).__setattr__("_data", copy.copy(self._data))
-    return new_obj
+    if share_model:
+      return self.__class__(copy.copy(self._data))
+    return self.__class__(copy.deepcopy(self._data))
 
   def copy(self):
     """Returns a copy of this MjData instance with the same parent MjModel."""
@@ -530,6 +526,12 @@ class MjData(metaclass=_MjDataMeta):
     if not 0 <= contact_id < self.ncon:
       raise ValueError(_CONTACT_ID_OUT_OF_RANGE
                        .format(max_valid=self.ncon-1, actual=contact_id))
+
+    # Run the portion of `mj_step2` that are needed for correct contact forces.
+    mujoco.mj_fwdActuation(self._model.ptr, self._data)
+    mujoco.mj_fwdAcceleration(self._model.ptr, self._data)
+    mujoco.mj_fwdConstraint(self._model.ptr, self._data)
+
     wrench = np.empty(6, dtype=np.float64)
     mujoco.mj_contactForce(self._model.ptr, self._data, contact_id, wrench)
     return wrench.reshape(2, 3)

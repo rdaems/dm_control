@@ -132,6 +132,41 @@ class MujocoEngineTest(parameterized.TestCase):
       contains_decor = np.any(pixels[:, :, 1] == obj_type_decor)
       self.assertEqual(contains_decor, enable_geom_frame_rendering)
 
+  def testSceneCallback(self):
+    empty_world = """
+    <mujoco>
+      <worldbody>
+        <camera name="cam" pos="0 0 3"/>
+      </worldbody>
+    </mujoco>
+    """
+
+    def callback(_, scn: mujoco.MjvScene):
+      # Add a red box to the scene
+      scn.ngeom += 1
+      mujoco.mjv_initGeom(
+          scn.geoms[scn.ngeom - 1],
+          mujoco.mjtGeom.mjGEOM_BOX.value,
+          size=np.array([0.2, 0.2, 0.2]),
+          pos=np.zeros(3),
+          mat=np.eye(3).flatten(),
+          rgba=np.array([1, 0, 0, 1], dtype=np.float32))
+
+    physics = engine.Physics.from_xml_string(empty_world)
+
+    # Without the callback, render should return a black image.
+    empty_image = physics.render(
+        height=8, width=8, camera_id='cam', scene_callback=None)
+    np.testing.assert_array_equal(
+        np.zeros((8, 8, 3), dtype=np.uint8), empty_image)
+
+    # With the callback, there should be a red box.
+    pixels = physics.render(
+        height=8, width=8, camera_id='cam', scene_callback=callback)
+    # Are there any pixels where red component is bigger than green and blue?
+    any_red_pixels = np.any(pixels[:, :, 0] > np.max(pixels[:, :, 1:3], axis=2))
+    self.assertTrue(any_red_pixels, 'Expecting some red pixels.')
+
   def testTextOverlay(self):
     height, width = 480, 640
     overlay = engine.TextOverlay(title='Title', body='Body', style='big',
@@ -335,6 +370,10 @@ class MujocoEngineTest(parameterized.TestCase):
 
   def testSetGetPhysicsState(self):
     physics_state = self._physics.get_state()
+
+    # qpos, qvel, act
+    self.assertLen(self._physics._physics_state_items(), 3)
+
     self._physics.set_state(physics_state)
 
     new_physics_state = np.random.random_sample(physics_state.shape)
@@ -342,6 +381,50 @@ class MujocoEngineTest(parameterized.TestCase):
 
     np.testing.assert_allclose(new_physics_state,
                                self._physics.get_state())
+
+  def testSetGetPhysicsStateWithPlugin(self):
+    # Model copied from mujoco/test/plugin/elasticity/elasticity_test.cc
+    model_with_cable_plugin = """
+    <mujoco>
+      <option gravity="0 0 0"/>
+      <extension>
+        <plugin plugin="mujoco.elasticity.cable"/>
+      </extension>
+      <worldbody>
+        <geom type="plane" size="0 0 1" quat="1 0 0 0"/>
+        <site name="reference" pos="0 0 0"/>
+        <composite type="cable" curve="s" count="41 1 1" size="1" offset="0 0 1" initial="none">
+          <plugin plugin="mujoco.elasticity.cable">
+            <config key="twist" value="1e6"/>
+            <config key="bend" value="1e9"/>
+          </plugin>
+          <joint kind="main" damping="2"/>
+          <geom type="capsule" size=".005" density="1"/>
+        </composite>
+      </worldbody>
+      <contact>
+        <exclude body1="B_first" body2="B_last"/>
+      </contact>
+      <sensor>
+        <framepos objtype="site" objname="S_last"/>
+      </sensor>
+      <actuator>
+        <motor site="S_last" gear="0 0 0 0 1 0" ctrllimited="true" ctrlrange="0 4"/>
+      </actuator>
+    </mujoco>
+    """
+    physics = engine.Physics.from_xml_string(model_with_cable_plugin)
+    physics_state = physics.get_state()
+
+    # qpos, qvel, act, plugin_state
+    self.assertLen(physics._physics_state_items(), 4)
+
+    physics.set_state(physics_state)
+
+    new_physics_state = np.random.random_sample(physics_state.shape)
+    physics.set_state(new_physics_state)
+
+    np.testing.assert_allclose(new_physics_state, physics.get_state())
 
   def testSetInvalidPhysicsState(self):
     badly_shaped_state = np.repeat(self._physics.get_state(), repeats=2)

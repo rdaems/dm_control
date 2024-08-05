@@ -169,7 +169,8 @@ class _CommonEnvironment:
                n_sub_steps=None,
                raise_exception_on_physics_error=True,
                strip_singleton_obs_buffer_dim=False,
-               delayed_observation_padding=ObservationPadding.ZERO):
+               delayed_observation_padding=ObservationPadding.ZERO,
+               legacy_step: bool = True):
     """Initializes an instance of `_CommonEnvironment`.
 
     Args:
@@ -194,6 +195,9 @@ class _CommonEnvironment:
         observables. If `ZERO` then the buffer is initially filled with zeroes.
         If `INITIAL_VALUE` then the buffer is initially filled with the first
         observation values.
+      legacy_step: If True, steps the state with up-to-date position and
+        velocity dependent fields. See Page 6 of
+        https://arxiv.org/abs/2006.12983 for more information.
     """
     if not isinstance(delayed_observation_padding, ObservationPadding):
       raise ValueError(
@@ -210,6 +214,7 @@ class _CommonEnvironment:
     self._raise_exception_on_physics_error = raise_exception_on_physics_error
     self._strip_singleton_obs_buffer_dim = strip_singleton_obs_buffer_dim
     self._delayed_observation_padding = delayed_observation_padding
+    self._legacy_step = legacy_step
 
     if n_sub_steps is not None:
       warnings.simplefilter('once', DeprecationWarning)
@@ -248,6 +253,7 @@ class _CommonEnvironment:
       self._physics.free()
     self._physics = mjcf.Physics.from_mjcf_model(
         self._task.root_entity.mjcf_model)
+    self._physics.legacy_step = self._legacy_step
 
   def _make_observation_updater(self):
     pad_with_initial_value = (
@@ -286,18 +292,26 @@ class _CommonEnvironment:
 class Environment(_CommonEnvironment, dm_env.Environment):
   """Reinforcement learning environment for Composer tasks."""
 
-  def __init__(self, task, time_limit=float('inf'), random_state=None,
-               n_sub_steps=None,
-               raise_exception_on_physics_error=True,
-               strip_singleton_obs_buffer_dim=False,
-               max_reset_attempts=1,
-               delayed_observation_padding=ObservationPadding.ZERO):
+  def __init__(
+      self,
+      task,
+      time_limit=float('inf'),
+      random_state=None,
+      n_sub_steps=None,
+      raise_exception_on_physics_error=True,
+      strip_singleton_obs_buffer_dim=False,
+      max_reset_attempts=1,
+      recompile_mjcf_every_episode=True,
+      fixed_initial_state=False,
+      delayed_observation_padding=ObservationPadding.ZERO,
+      legacy_step: bool = True,
+  ):
     """Initializes an instance of `Environment`.
 
     Args:
       task: Instance of `composer.base.Task`.
-      time_limit: (optional) A float, the time limit in seconds beyond which
-        an episode is forced to terminate.
+      time_limit: (optional) A float, the time limit in seconds beyond which an
+        episode is forced to terminate.
       random_state: (optional) an int seed or `np.random.RandomState` instance.
       n_sub_steps: (DEPRECATED) An integer, number of physics steps to take per
         agent control step. New code should instead override the
@@ -306,20 +320,29 @@ class Environment(_CommonEnvironment, dm_env.Environment):
         `PhysicsError` should be raised as an exception. If `False`, physics
         errors will result in the current episode being terminated with a
         warning logged, and a new episode started.
-      strip_singleton_obs_buffer_dim: (optional) A boolean, if `True`,
-        the array shape of observations with `buffer_size == 1` will not have a
-        leading buffer dimension.
+      strip_singleton_obs_buffer_dim: (optional) A boolean, if `True`, the array
+        shape of observations with `buffer_size == 1` will not have a leading
+        buffer dimension.
       max_reset_attempts: (optional) Maximum number of times to try resetting
-        the environment. If an `EpisodeInitializationError` is raised
-        during this process, an environment reset is reattempted up to this
-        number of times. If this count is exceeded then the most recent
-        exception will be allowed to propagate. Defaults to 1, i.e. no failure
-        is allowed.
+        the environment. If an `EpisodeInitializationError` is raised during
+        this process, an environment reset is reattempted up to this number of
+        times. If this count is exceeded then the most recent exception will be
+        allowed to propagate. Defaults to 1, i.e. no failure is allowed.
+      recompile_mjcf_every_episode: If True will recompile the mjcf model
+        between episodes. This specifically skips the `initialize_episode_mjcf`
+        and `after_compile` steps. This allows a speedup if no changes are made
+        to the model.
+      fixed_initial_state: If True the starting state of every single episode
+        will be the same. Meaning an identical sequence of action will lead to
+        an identical final state. If False, will randomize the starting state at
+        every episode.
       delayed_observation_padding: (optional) An `ObservationPadding` enum value
         specifying the padding behavior of the initial buffers for delayed
         observables. If `ZERO` then the buffer is initially filled with zeroes.
         If `INITIAL_VALUE` then the buffer is initially filled with the first
         observation values.
+      legacy_step: If True, steps the state with up-to-date position and
+        velocity dependent fields.
     """
     super().__init__(
         task=task,
@@ -328,8 +351,13 @@ class Environment(_CommonEnvironment, dm_env.Environment):
         n_sub_steps=n_sub_steps,
         raise_exception_on_physics_error=raise_exception_on_physics_error,
         strip_singleton_obs_buffer_dim=strip_singleton_obs_buffer_dim,
-        delayed_observation_padding=delayed_observation_padding)
+        delayed_observation_padding=delayed_observation_padding,
+        legacy_step=legacy_step)
     self._max_reset_attempts = max_reset_attempts
+    self._recompile_mjcf_every_episode = recompile_mjcf_every_episode
+    self._mjcf_never_compiled = True
+    self._fixed_initial_state = fixed_initial_state
+    self._fixed_random_state = self._random_state.get_state()
     self._reset_next_step = True
 
   def reset(self):
@@ -345,8 +373,15 @@ class Environment(_CommonEnvironment, dm_env.Environment):
           raise
 
   def _reset_attempt(self):
-    self._hooks.initialize_episode_mjcf(self._random_state)
-    self._recompile_physics_and_update_observables()
+    if self._recompile_mjcf_every_episode or self._mjcf_never_compiled:
+      if self._fixed_initial_state:
+        self._random_state.set_state(self._fixed_random_state)
+      self._hooks.initialize_episode_mjcf(self._random_state)
+      self._recompile_physics_and_update_observables()
+      self._mjcf_never_compiled = False
+
+    if self._fixed_initial_state:
+      self._random_state.set_state(self._fixed_random_state)
     with self._physics.reset_context():
       self._hooks.initialize_episode(self._physics_proxy, self._random_state)
     self._observation_updater.reset(self._physics_proxy, self._random_state)
@@ -383,10 +418,7 @@ class Environment(_CommonEnvironment, dm_env.Environment):
 
     try:
       for i in range(self._n_sub_steps):
-        self._hooks.before_substep(self._physics_proxy, action,
-                                   self._random_state)
-        self._physics.step()
-        self._hooks.after_substep(self._physics_proxy, self._random_state)
+        self._substep(action)
         # The final observation update must happen after all the hooks in
         # `self._hooks.after_step` is called. Otherwise, if any of these hooks
         # modify the physics state then we might capture an observation that is
@@ -423,6 +455,12 @@ class Environment(_CommonEnvironment, dm_env.Environment):
     else:
       self._reset_next_step = True
       return dm_env.TimeStep(dm_env.StepType.LAST, reward, discount, obs)
+
+  def _substep(self, action):
+    self._hooks.before_substep(
+        self._physics_proxy, action, self._random_state)
+    self._physics.step()
+    self._hooks.after_substep(self._physics_proxy, self._random_state)
 
   def action_spec(self):
     """Returns the action specification for this environment."""

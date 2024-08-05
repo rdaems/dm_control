@@ -91,33 +91,6 @@ def _get_attributes(size_names, strip_prefixes):
   return out
 
 
-# Fields related to the internal states of actuators (i.e. with a leading
-# dimension of 'na') require special treatment.
-def _get_actuator_state_fields():
-  actuator_state_fields = []
-  for sizes_dict in sizes.array_sizes.values():
-    for field_name, dimensions in sizes_dict.items():
-      if dimensions[0] == 'na':
-        actuator_state_fields.append(field_name)
-  return frozenset(actuator_state_fields)
-
-_ACTUATOR_STATE_FIELDS = _get_actuator_state_fields()
-
-
-def _filter_stateful_actuators(physics, actuator_names):
-  """Removes any stateless actuators from the list of actuator names."""
-  if physics.model.na:
-    # MuJoCo requires that stateful actuators always come after stateless
-    # actuators in the model, so we keep actuator names only if their
-    # corresponding IDs are >= to the total number of stateless actuators.
-    num_stateless_actuators = physics.model.nu - physics.model.na
-    return [
-        name for name in actuator_names
-        if physics.model.name2id(name, 'actuator') >= num_stateless_actuators]
-  else:
-    return []
-
-
 _ATTRIBUTES = {
     'actuator': _get_attributes(['na', 'nu'], strip_prefixes=['actuator']),
     'body': _get_attributes(['nbody'], strip_prefixes=['body']),
@@ -317,14 +290,7 @@ class Binding:
     try:
       index = self._array_index_cache[name]
     except KeyError:
-      # If we are indexing into a field relating to actuator internal states
-      # then we must first remove the names of any stateless actuators.
-      if name in _ACTUATOR_STATE_FIELDS:
-        named_index = _filter_stateful_actuators(
-            self._physics, self._named_index)
-      else:
-        named_index = self._named_index
-      index = named_indexer._convert_key(named_index)  # pylint: disable=protected-access
+      index = named_indexer._convert_key(self._named_index)  # pylint: disable=protected-access
       self._array_index_cache[name] = index
     return array, index
 
@@ -373,7 +339,7 @@ class Binding:
 
         if self._physics.is_dirty and not triggers_dirty:
           self._physics.forward()
-        if isinstance(index, int) and array.ndim == 1:
+        if np.issubdtype(type(index), np.integer) and array.ndim == 1:
           # Case where indexing results in a scalar.
           out = array[index]
         else:
@@ -546,7 +512,7 @@ class Physics(mujoco.Physics):
     super().forward()
     self._dirty = False
 
-  def bind(self, mjcf_elements):
+  def bind(self, mjcf_elements) -> Binding:
     """Creates a binding between this `Physics` instance and `mjcf.Element`s.
 
     The binding allows for easier interaction with the `Physics` data structures
@@ -643,7 +609,7 @@ class Physics(mujoco.Physics):
       ValueError: If `mjcf_elements` cannot be bound to this Physics.
     """
     if mjcf_elements is None:
-      return None
+      raise ValueError('mjcf_elements is None.')
 
     # To reduce overhead from processing MJCF elements and making new bindings,
     # we cache and reuse existing Binding objects. The cheapest version of
@@ -659,13 +625,11 @@ class Physics(mujoco.Physics):
       # `mjcf_elements` is not iterable.
       cache_key = mjcf_elements
 
-    needs_new_binding = False
     try:
-      binding = self._bindings[cache_key]
+      return self._bindings[cache_key]
     except KeyError:
       # This means `mjcf_elements` is hashable, so we use it as cache key.
       namespace, named_index = names_from_elements(mjcf_elements)
-      needs_new_binding = True
     except TypeError:
       # This means `mjcf_elements` is unhashable, fallback to caching by name.
       namespace, named_index = names_from_elements(mjcf_elements)
@@ -678,14 +642,12 @@ class Physics(mujoco.Physics):
         cache_key = (namespace, named_index)
 
       try:
-        binding = self._bindings[cache_key]
+        return self._bindings[cache_key]
       except KeyError:
-        needs_new_binding = True
+        pass
 
-    if needs_new_binding:
-      binding = Binding(weakref.proxy(self), namespace, named_index)
-      self._bindings[cache_key] = binding
-
+    binding = Binding(weakref.proxy(self), namespace, named_index)
+    self._bindings[cache_key] = binding
     return binding
 
 

@@ -56,8 +56,9 @@ class _ObservableKeys:
   def __getattr__(self, name):
     try:
       model_identifier = self._entity.mjcf_model.full_identifier
-    except AttributeError:
-      raise ValueError('cannot retrieve the full identifier of mjcf_model')
+    except AttributeError as exc:
+      raise ValueError(
+          'cannot retrieve the full identifier of mjcf_model') from exc
     return os.path.join(model_identifier, name)
 
   def __dir__(self):
@@ -106,8 +107,9 @@ class Observables:
       # otherwise __getattr__ is executed and we get a very funky error.
       try:
         model_identifier = self._entity.mjcf_model.full_identifier
-      except AttributeError:
-        raise ValueError('cannot retrieve the full identifier of mjcf_model')
+      except AttributeError as exc:
+        raise ValueError(
+            'Cannot retrieve the full identifier of mjcf_model.') from exc
 
       return collections.OrderedDict(
           [(os.path.join(model_identifier, name), observable)
@@ -128,8 +130,9 @@ class Observables:
     if name_fully_qualified:
       try:
         model_identifier = self._entity.mjcf_model.full_identifier
-      except AttributeError:
-        raise ValueError('cannot retrieve the full identifier of mjcf_model')
+      except AttributeError as exc:
+        raise ValueError(
+            'Cannot retrieve the full identifier of mjcf_model.') from exc
       return self._observables[name.replace(model_identifier, '')]
     else:
       return self._observables[name]
@@ -150,8 +153,8 @@ class Observables:
     for obs_key, obs_options in options.items():
       try:
         obs = self._observables[obs_key]
-      except KeyError:
-        raise KeyError('No observable with name {!r}'.format(obs_key))
+      except KeyError as exc:
+        raise KeyError('No observable with name {!r}'.format(obs_key)) from exc
       obs.configure(**obs_options)
 
   def enable_all(self):
@@ -172,19 +175,23 @@ class Observables:
 class FreePropObservableMixin(metaclass=abc.ABCMeta):
   """Enforce observables of a free-moving object."""
 
-  @abc.abstractproperty
+  @property
+  @abc.abstractmethod
   def position(self):
     pass
 
-  @abc.abstractproperty
+  @property
+  @abc.abstractmethod
   def orientation(self):
     pass
 
-  @abc.abstractproperty
+  @property
+  @abc.abstractmethod
   def linear_velocity(self):
     pass
 
-  @abc.abstractproperty
+  @property
+  @abc.abstractmethod
   def angular_velocity(self):
     pass
 
@@ -284,7 +291,8 @@ class Entity(metaclass=abc.ABCMeta):
     """Callback executed after an agent control step."""
     pass
 
-  @abc.abstractproperty
+  @property
+  @abc.abstractmethod
   def mjcf_model(self):
     raise NotImplementedError
 
@@ -472,7 +480,8 @@ class Entity(metaclass=abc.ABCMeta):
       if position is not None:
         physics.bind(root_joint).qpos[:3] = position
       if quaternion is not None:
-        physics.bind(root_joint).qpos[3:] = quaternion
+        normalised_quaternion = quaternion / np.linalg.norm(quaternion)
+        physics.bind(root_joint).qpos[3:] = normalised_quaternion
     else:
       attachment_frame = mjcf.get_attachment_frame(self.mjcf_model)
       if attachment_frame is None:
@@ -513,7 +522,7 @@ class Entity(metaclass=abc.ABCMeta):
     if position is not None:
       new_position = current_position + position
     if quaternion is not None:
-      quaternion = np.array(quaternion, dtype=np.float64, copy=False)
+      quaternion = np.asarray(quaternion, dtype=np.float64)
       new_quaternion = _multiply_quaternions(quaternion, current_quaternion)
       root_joint = mjcf.get_frame_freejoint(self.mjcf_model)
       if root_joint and rotate_velocity:

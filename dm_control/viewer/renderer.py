@@ -16,6 +16,8 @@
 
 import abc
 import contextlib
+import subprocess
+import sys
 
 from dm_control.mujoco import wrapper
 from dm_control.viewer import util
@@ -42,6 +44,26 @@ _DEFAULT_RENDER_FLAGS = np.zeros(mujoco.mjtRndFlag.mjNRNDFLAG, dtype=np.ubyte)
 _DEFAULT_RENDER_FLAGS[mujoco.mjtRndFlag.mjRND_SHADOW.value] = 1
 _DEFAULT_RENDER_FLAGS[mujoco.mjtRndFlag.mjRND_REFLECTION.value] = 1
 _DEFAULT_RENDER_FLAGS[mujoco.mjtRndFlag.mjRND_SKYBOX.value] = 1
+_DEFAULT_RENDER_FLAGS[mujoco.mjtRndFlag.mjRND_CULL_FACE.value] = 1
+
+# Font scale values.
+_DEFAULT_FONT_SCALE = mujoco.mjtFontScale.mjFONTSCALE_100
+_HIDPI_FONT_SCALE = mujoco.mjtFontScale.mjFONTSCALE_200
+
+
+def _has_high_dpi() -> bool:
+  """Returns True if the display is a high DPI display."""
+  if sys.platform == 'darwin':
+    # On macOS, we can use the system_profiler command to determine if the
+    # display is retina.
+    return subprocess.call(
+        'system_profiler SPDisplaysDataType | grep -i "retina"',
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    ) == 0
+  # TODO(zakka): Figure out how to detect high DPI displays on Linux.
+  return False
 
 
 class BaseRenderer(metaclass=abc.ABCMeta):
@@ -149,10 +171,11 @@ class OffScreenRenderer(BaseRenderer):
       new_offheight = max(self._model.vis.global_.offheight, viewport.height)
       self._model.vis.global_.offwidth = new_offwidth
       self._model.vis.global_.offheight = new_offheight
+      font_scale = _HIDPI_FONT_SCALE if _has_high_dpi() else _DEFAULT_FONT_SCALE
       self._mujoco_context = wrapper.MjrContext(
           model=self._model,
           gl_context=self._surface,
-          font_scale=mujoco.mjtFontScale.mjFONTSCALE_100)
+          font_scale=font_scale)
       self._rgb_buffer = np.empty(
           (viewport.height, viewport.width, 3), dtype=np.uint8)
 
@@ -214,6 +237,11 @@ class Perturbation:
     if action is None or grab_pos is None:
       return
 
+    body_pos = self._data.xpos[self._body_id]
+    body_mat = self._data.xmat[self._body_id].reshape(3, 3)
+    grab_local_pos = body_mat.T.dot(grab_pos - body_pos)
+    self._perturb.localpos[:] = grab_local_pos
+
     mujoco.mjv_initPerturb(self._model.ptr, self._data.ptr, self._scene.ptr,
                            self._perturb.ptr)
     self._action = action
@@ -224,14 +252,9 @@ class Perturbation:
     else:
       self._perturb.active = mujoco.mjtPertBit.mjPERT_ROTATE
 
-    body_pos = self._data.xpos[self._body_id]
-    body_mat = self._data.xmat[self._body_id].reshape(3, 3)
-    grab_local_pos = body_mat.T.dot(grab_pos - body_pos)
-    self._perturb.localpos[:] = grab_local_pos
-
   def tick_move(self, viewport_offset):
     """Transforms object's location/rotation by the specified amount."""
-    if self._action:
+    if self._action and self._action != mujoco.mjtMouse.mjMOUSE_NONE:
       mujoco.mjv_movePerturb(self._model.ptr, self._data.ptr, self._action,
                              viewport_offset[0], viewport_offset[1],
                              self._scene.ptr, self._perturb.ptr)
@@ -378,7 +401,8 @@ class SceneCamera:
                data,
                options,
                settings=None,
-               zoom_factor=_FULL_SCENE_ZOOM_FACTOR):
+               zoom_factor=_FULL_SCENE_ZOOM_FACTOR,
+               scene_callback=None):
     """Instance initializer.
 
     Args:
@@ -388,6 +412,9 @@ class SceneCamera:
       settings: Optional, internal camera settings obtained from another
         SceneCamera instance using 'settings' property.
       zoom_factor: The initial zoom factor for zooming into the scene.
+      scene_callback: Scene callback.
+        This is a callable of the form: `my_callable(MjModel, MjData, MjvScene)`
+        that gets applied to every rendered scene.
     """
     # Design notes:
     # We need to recreate the camera for each new model, because each model
@@ -399,10 +426,9 @@ class SceneCamera:
     self._options = options
 
     self._camera = wrapper.MjvCamera()
-    self._camera.trackbodyid = _NO_BODY_TRACKED_INDEX
-    self._camera.fixedcamid = _FREE_CAMERA_INDEX
-    self._camera.type_ = mujoco.mjtCamera.mjCAMERA_FREE
+    self.set_freelook_mode()
     self._zoom_factor = zoom_factor
+    self._scene_callback = scene_callback
 
     if settings is not None:
       self._settings = settings
@@ -415,6 +441,7 @@ class SceneCamera:
     self._camera.trackbodyid = _NO_BODY_TRACKED_INDEX
     self._camera.fixedcamid = _FREE_CAMERA_INDEX
     self._camera.type_ = mujoco.mjtCamera.mjCAMERA_FREE
+    mujoco.mjv_defaultFreeCamera(self._model.ptr, self._camera.ptr)
 
   def set_tracking_mode(self, body_id):
     """Latches the camera onto the specified body.
@@ -467,6 +494,7 @@ class SceneCamera:
     viewport_pos = viewport.screen_to_inverse_viewport(screen_pos)
     grab_world_pos = np.empty(3, dtype=np.double)
     selected_geom_id_arr = np.intc([-1])
+    selected_flex_id_arr = np.intc([-1])
     selected_skin_id_arr = np.intc([-1])
     selected_body_id = mujoco.mjv_select(
         self._model.ptr,
@@ -478,9 +506,14 @@ class SceneCamera:
         self._scene.ptr,
         grab_world_pos,
         selected_geom_id_arr,
+        selected_flex_id_arr,
         selected_skin_id_arr,
     )
-    del selected_geom_id_arr, selected_skin_id_arr  # Unused.
+    del (
+        selected_geom_id_arr,
+        selected_skin_id_arr,
+        selected_flex_id_arr,
+    )  # Unused.
     if selected_body_id < 0:
       selected_body_id = _INVALID_BODY_INDEX
       grab_world_pos = None
@@ -499,6 +532,10 @@ class SceneCamera:
                            self._options.visualization.ptr, perturb_to_render,
                            self._camera.ptr, mujoco.mjtCatBit.mjCAT_ALL,
                            self._scene.ptr)
+
+    # Apply callback if defined.
+    if self._scene_callback is not None:
+      self._scene_callback(self._model, self._data, self._scene)
     return self._scene
 
   def zoom_to_scene(self):

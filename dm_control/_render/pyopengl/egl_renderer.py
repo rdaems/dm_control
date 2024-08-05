@@ -26,13 +26,13 @@ from dm_control._render import executor
 PYOPENGL_PLATFORM = os.environ.get(constants.PYOPENGL_PLATFORM)
 
 if not PYOPENGL_PLATFORM:
-  os.environ[constants.PYOPENGL_PLATFORM] = constants.EGL
-elif PYOPENGL_PLATFORM != constants.EGL:
+  os.environ[constants.PYOPENGL_PLATFORM] = constants.EGL[0]
+elif PYOPENGL_PLATFORM != constants.EGL[0]:
   raise ImportError(
       'Cannot use EGL rendering platform. '
       'The PYOPENGL_PLATFORM environment variable is set to {!r} '
       '(should be either unset or {!r}).'
-      .format(PYOPENGL_PLATFORM, constants.EGL))
+      .format(PYOPENGL_PLATFORM, constants.EGL[0]))
 
 
 # pylint: disable=g-import-not-at-top
@@ -43,14 +43,14 @@ from OpenGL import error
 def create_initialized_headless_egl_display():
   """Creates an initialized EGL display directly on a device."""
   all_devices = EGL.eglQueryDevicesEXT()
-  selected_device = os.environ.get('EGL_DEVICE_ID', None)
+  selected_device = os.environ.get('MUJOCO_EGL_DEVICE_ID', None)
   if selected_device is None:
     candidates = all_devices
   else:
     device_idx = int(selected_device)
     if not 0 <= device_idx < len(all_devices):
       raise RuntimeError(
-          f'EGL_DEVICE_ID must be an integer between 0 and '
+          f'MUJOCO_EGL_DEVICE_ID must be an integer between 0 and '
           f'{len(all_devices) - 1} (inclusive), got {device_idx}.')
     candidates = all_devices[device_idx:device_idx + 1]
   for device in candidates:
@@ -96,18 +96,20 @@ class EGLContext(base.ContextBase):
   def __init__(self, max_width, max_height):
     # EGLContext currently only works with `PassthroughRenderExecutor`.
     # TODO(b/110927854) Make this work with the offloading executor.
+    self._context = None
     super().__init__(max_width, max_height, executor.PassthroughRenderExecutor)
 
   def _platform_init(self, unused_max_width, unused_max_height):
     """Initialization this EGL context."""
-    num_configs = ctypes.c_long()
+    num_configs = ctypes.c_long(0)
     config_size = 1
-    config = EGL.EGLConfig()
+    # ctypes syntax for making an array of length config_size.
+    configs = (EGL.EGLConfig * config_size)()
     EGL.eglReleaseThread()
     EGL.eglChooseConfig(
         EGL_DISPLAY,
         EGL_ATTRIBUTES,
-        ctypes.byref(config),
+        configs,
         config_size,
         num_configs)
     if num_configs.value < 1:
@@ -116,7 +118,7 @@ class EGLContext(base.ContextBase):
           'desired attributes: {}'.format(EGL_ATTRIBUTES))
     EGL.eglBindAPI(EGL.EGL_OPENGL_API)
     self._context = EGL.eglCreateContext(
-        EGL_DISPLAY, config, EGL.EGL_NO_CONTEXT, None)
+        EGL_DISPLAY, configs[0], EGL.EGL_NO_CONTEXT, None)
     if not self._context:
       raise RuntimeError('Cannot create an EGL context.')
 

@@ -105,7 +105,7 @@ class _Attribute(metaclass=abc.ABCMeta):
   def _assign_from_string(self, string):
     self._assign(string)
 
-  def to_xml_string(self, prefix_root):  # pylint: disable=unused-argument
+  def to_xml_string(self, prefix_root, **kwargs):  # pylint: disable=unused-argument
     if self._value is None:
       return None
     else:
@@ -157,6 +157,21 @@ class Float(_Attribute):
       raise ValueError('Expect a float value: got {}'.format(value)) from None
     self._value = float_value
 
+  def to_xml_string(self, prefix_root=None,
+                    *,
+                    precision=constants.XML_DEFAULT_PRECISION,
+                    zero_threshold=0,
+                    **kwargs):
+    if self._value is None:
+      return None
+    else:
+      out = io.BytesIO()
+      value = self._value
+      if abs(value) < zero_threshold:
+        value = 0.0
+      np.savetxt(out, [value], fmt=f'%.{precision:d}g', newline=' ')
+      return util.to_native_string(out.getvalue())[:-1]  # Strip trailing space.
+
 
 class Keyword(_Attribute):
   """A keyword MJCF attribute."""
@@ -169,7 +184,7 @@ class Keyword(_Attribute):
                      conflict_behavior)
 
   def _assign(self, value):
-    if not value:
+    if value is None or value == '':  # pylint: disable=g-explicit-bool-comparison
       self.clear()
     else:
       try:
@@ -199,15 +214,20 @@ class Array(_Attribute):
   def _assign_from_string(self, string):
     self._assign(np.fromstring(string, dtype=self._dtype, sep=' '))
 
-  def to_xml_string(self, prefix_root=None):  # pylint: disable=unused-argument
+  def to_xml_string(self, prefix_root=None,
+                    *,
+                    precision=constants.XML_DEFAULT_PRECISION,
+                    zero_threshold=0,
+                    **kwargs):
     if self._value is None:
       return None
     else:
       out = io.BytesIO()
-      # 17 decimal digits is sufficient to represent a double float without loss
-      # of precision.
-      # https://en.wikipedia.org/wiki/IEEE_754#Character_representation
-      np.savetxt(out, self._value, fmt='%.17g', newline=' ')
+      value = self._value
+      if zero_threshold:
+        value = np.copy(value)
+        value[np.abs(value) < zero_threshold] = 0
+      np.savetxt(out, value, fmt=f'%.{precision:d}g', newline=' ')
       return util.to_native_string(out.getvalue())[:-1]  # Strip trailing space.
 
   def _check_shape(self, array):
@@ -255,7 +275,7 @@ class Identifier(_Attribute):
     prefix.append(self._value or '')
     return constants.PREFIX_SEPARATOR.join(prefix) or constants.PREFIX_SEPARATOR
 
-  def to_xml_string(self, prefix_root=None):
+  def to_xml_string(self, prefix_root=None, **kwargs):
     if self._parent.tag == constants.DEFAULT:
       return self._defaults_string(prefix_root)
     elif self._value:
@@ -352,7 +372,7 @@ class Reference(_Attribute):
       out_string = prefix + self._value
     return out_string
 
-  def to_xml_string(self, prefix_root):
+  def to_xml_string(self, prefix_root, **kwargs):
     self._check_dead_reference()
     if isinstance(self._value, base.Element):
       return self._value.prefixed_identifier(prefix_root)
@@ -388,7 +408,7 @@ class BasePath(_Attribute):
     if self._value:
       self._parent.namescope.remove(constants.BASEPATH, self._path_namespace)
 
-  def to_xml_string(self, prefix_root=None):
+  def to_xml_string(self, prefix_root=None, **kwargs):
     return None
 
 
@@ -491,24 +511,41 @@ class File(_Attribute):
     _, basename = os.path.split(path)
     filename, extension = os.path.splitext(basename)
 
-    # Look in the dict of pre-loaded assets before checking the filesystem.
-    try:
+    assetdir = None
+    if self._parent.namescope.has_identifier(
+        constants.BASEPATH, constants.ASSETDIR_NAMESPACE
+    ):
+      assetdir = self._parent.namescope.get(
+          constants.BASEPATH, constants.ASSETDIR_NAMESPACE
+      )
+
+    if path in self._parent.namescope.assets:
+      # Look in the dict of pre-loaded assets before checking the filesystem.
       contents = self._parent.namescope.assets[path]
-    except KeyError:
+    else:
       # Construct the full path to the asset file, prefixed by the path to the
       # model directory, and by `meshdir` or `texturedir` if appropriate.
       path_parts = []
       if self._parent.namescope.model_dir:
         path_parts.append(self._parent.namescope.model_dir)
-      try:
-        base_path = self._parent.namescope.get(constants.BASEPATH,
-                                               self._path_namespace)
+
+      if self._parent.namescope.has_identifier(
+          constants.BASEPATH, self._path_namespace
+      ):
+        base_path = self._parent.namescope.get(
+            constants.BASEPATH, self._path_namespace
+        )
         path_parts.append(base_path)
-      except KeyError:
-        pass
+      elif (
+          self._path_namespace
+          in (constants.TEXTUREDIR_NAMESPACE, constants.MESHDIR_NAMESPACE)
+          and assetdir is not None
+      ):
+        path_parts.append(assetdir)
       path_parts.append(path)
       full_path = os.path.join(*path_parts)  # pylint: disable=no-value-for-parameter
       contents = resources.GetResource(full_path)
+
     if self._parent.tag == constants.SKIN:
       return SkinAsset(contents=contents, parent=self._parent,
                        extension=extension, prefix=filename)
@@ -527,7 +564,7 @@ class File(_Attribute):
                          'querying the contents.')
     return self._value.contents
 
-  def to_xml_string(self, prefix_root=None):
+  def to_xml_string(self, prefix_root=None, **kwargs):
     """Returns the asset filename as it will appear in the generated XML."""
     del prefix_root  # Unused
     if self._value is not None:

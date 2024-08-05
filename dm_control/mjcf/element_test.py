@@ -198,6 +198,26 @@ class ElementTest(parameterized.TestCase):
       mujoco.add('default')
     self.assertIsNotNone(mujoco.default)
 
+  def testInsert(self):
+    mujoco = element.RootElement(model='test')
+
+    # add in order
+    mujoco.worldbody.add('body', name='0')
+    mujoco.worldbody.add('body', name='1')
+    mujoco.worldbody.add('body', name='2')
+
+    # insert into position 0, check order
+    mujoco.worldbody.insert('body', name='foo', position=0)
+    expected_order = ['foo', '0', '1', '2']
+    for i, child in enumerate(mujoco.worldbody._children):
+      self.assertEqual(child.name, expected_order[i])
+
+    # insert into position -1, check order
+    mujoco.worldbody.insert('body', name='bar', position=-1)
+    expected_order = ['foo', '0', '1', 'bar', '2']
+    for i, child in enumerate(mujoco.worldbody._children):
+      self.assertEqual(child.name, expected_order[i])
+
   def testAddWithInvalidAttribute(self):
     mujoco = element.RootElement(model='test')
     with self.assertRaisesRegex(AttributeError, 'not a valid attribute'):
@@ -336,6 +356,12 @@ class ElementTest(parameterized.TestCase):
         subsubmodel_frame.to_xml_string().split('\n')[0],
         '<body '
         'pos="0.10000000000000001 0.10000000000000001 0.10000000000000001" '
+        'quat="0 1 0 0" '
+        'name="subsubmodel/">')
+    self.assertEqual(
+        subsubmodel_frame.to_xml_string(precision=5).split('\n')[0],
+        '<body '
+        'pos="0.1 0.1 0.1" '
         'quat="0 1 0 0" '
         'name="subsubmodel/">')
     self.assertEqual(subsubmodel_frame.all_children(),
@@ -1028,6 +1054,16 @@ class ElementTest(parameterized.TestCase):
     model_1.attach(model_2)
     self.assertEqual(model_1.size.nconmax, 345)
     self.assertEqual(model_1.size.njmax, 456)
+
+  def testMaxBytesConflictingValues(self):
+    model_1 = mjcf.RootElement()
+    model_1.size.memory = '10000'
+
+    model_2 = mjcf.RootElement()
+    model_2.size.memory = '1M'
+
+    model_1.attach(model_2)
+    self.assertEqual(model_1.size.memory, '1048576')
 
 
 if __name__ == '__main__':

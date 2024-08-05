@@ -15,12 +15,15 @@
 
 """Tests for index."""
 
+import collections
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dm_control.mujoco import index
 from dm_control.mujoco import wrapper
 from dm_control.mujoco.testing import assets
 from dm_control.mujoco.wrapper.mjbindings import sizes
+import mujoco
 import numpy as np
 
 MODEL = assets.get_contents('cartpole.xml')
@@ -56,6 +59,7 @@ class MujocoIndexTest(parameterized.TestCase):
     super().setUp()
     self._model = wrapper.MjModel.from_xml_string(MODEL)
     self._data = wrapper.MjData(self._model)
+    mujoco.mj_forward(self._model.ptr, self._data.ptr)
 
     self._size_to_axis_indexer = index.make_axis_indexers(self._model)
 
@@ -283,8 +287,8 @@ class MujocoIndexTest(parameterized.TestCase):
     index.struct_indexer(data, 'mjdata', size_to_axis_indexer)
 
   # pylint: disable=undefined-variable
-  @parameterized.parameters([
-      name for name in dir(np.ndarray)
+  @parameterized.named_parameters([
+      (name, name) for name in dir(np.ndarray)
       if not name.startswith('_')  # Exclude 'private' attributes
       and name not in ('ctypes', 'flat')  # Can't compare via identity/equality
   ])
@@ -310,11 +314,16 @@ class MujocoIndexTest(parameterized.TestCase):
 
 
 def _iter_indexers(model, data):
+  mujoco.mj_forward(model.ptr, data.ptr)
   size_to_axis_indexer = index.make_axis_indexers(model)
+  all_fields = collections.OrderedDict()
   for struct, struct_name in ((model, 'mjmodel'), (data, 'mjdata')):
     indexer = index.struct_indexer(struct, struct_name, size_to_axis_indexer)
     for field_name, field_indexer in indexer._asdict().items():
-      yield field_name, field_indexer
+      if field_name not in all_fields:
+        all_fields[field_name] = field_indexer
+  for field_name, field_indexer in all_fields.items():
+    yield field_name, field_indexer
 
 
 class AllFieldsTest(parameterized.TestCase):

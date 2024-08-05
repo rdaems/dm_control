@@ -17,8 +17,13 @@
 import os
 import zipfile
 
+from dm_control.mjcf import constants
 
-def export_with_assets_as_zip(mjcf_model, out_dir, model_name=None):
+
+def export_with_assets_as_zip(mjcf_model, out_dir, model_name=None,
+                              *,
+                              precision=constants.XML_DEFAULT_PRECISION,
+                              zero_threshold=0):
   """Saves mjcf_model and all its assets as a .zip file in the given directory.
 
   Creates a .zip file named `model_name`.zip in the specified `out_dir`, and a
@@ -34,6 +39,13 @@ def export_with_assets_as_zip(mjcf_model, out_dir, model_name=None):
       inside the .zip root containing the model and assets, and name of the XML
       file inside this directory. Defaults to the MJCF model name
       (`mjcf_model.model`).
+    precision: (optional) Number of digits to output for floating point
+      quantities.
+    zero_threshold: (optional) When outputting XML, floating point quantities
+      whose absolute value falls below this threshold will be treated as zero.
+
+  Returns:
+    The full path to the .zip file.
   """
 
   if model_name is None:
@@ -43,10 +55,13 @@ def export_with_assets_as_zip(mjcf_model, out_dir, model_name=None):
   zip_name = model_name + '.zip'
 
   files_to_zip = mjcf_model.get_assets()
-  files_to_zip[xml_name] = mjcf_model.to_xml_string()
+  files_to_zip[xml_name] = mjcf_model.to_xml_string(
+      precision=precision, zero_threshold=zero_threshold)
 
   if not os.path.exists(out_dir):
     os.makedirs(out_dir)
-  with zipfile.ZipFile(os.path.join(out_dir, zip_name), 'w') as zip_file:
+  file_name = os.path.join(out_dir, zip_name)
+  with zipfile.ZipFile(file_name, 'w') as zip_file:
     for filename, contents in files_to_zip.items():
       zip_file.writestr(os.path.join(model_name, filename), contents)
+  return file_name

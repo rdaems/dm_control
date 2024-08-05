@@ -66,7 +66,9 @@ class PhysicsTest(parameterized.TestCase):
       ('geom', True),
       ('geom', False),
       ('joint', True),
-      ('joint', False))
+      ('joint', False),
+      ('actuator', True),
+      ('actuator', False))
   def test_id(self, namespace, single_element):
     elements, full_identifiers = self.sample_elements(namespace, single_element)
     actual = self.physics.bind(elements).element_id
@@ -203,6 +205,22 @@ class PhysicsTest(parameterized.TestCase):
     physics = mjcf.Physics.from_mjcf_model(model)
     mass = physics.bind(model.worldbody).subtreemass
     self.assertEqual(mass, expected_mass)
+
+  def test_bind_stateful_actuator(self):
+    model = mjcf.RootElement()
+    body = model.worldbody.add('body')
+    body.add('joint', name='joint')
+    body.add('geom', type='sphere', size=[1])
+
+    model.actuator.add(
+        'general', name='act1', joint='joint', dyntype='integrator')
+
+    physics = mjcf.Physics.from_mjcf_model(model)
+    actuator = model.find('actuator', 'act1')
+    binding = physics.bind(actuator)
+
+    # This used to crash
+    self.assertEqual(0, binding.act)
 
   def test_caching(self):
     all_joints = self.model.find_all('joint')
@@ -560,6 +578,61 @@ class PhysicsTest(parameterized.TestCase):
         NotImplementedError,
         mjcf_physics._PICKLING_NOT_SUPPORTED.format(type=type(xpos_view))):
       pickle.dumps(xpos_view)
+
+  def test_plugins_elasticity(self):
+    root = mjcf.RootElement()
+    root.extension.add('plugin', plugin='mujoco.elasticity.cable')
+
+    # Replicate example in mujoco/model/plugin/elasticity/cable.xml
+    composite = root.worldbody.add(
+        'composite',
+        type='cable',
+        curve='s',
+        count=[41, 1, 1],
+        size=[1, 0, 0],
+        offset=[-0.3, 0, 0.6],
+        initial='none',
+    )
+    plugin = composite.add('plugin', plugin='mujoco.elasticity.cable')
+    plugin.add('config', key='twist', value='1e7')
+    plugin.add('config', key='bend', value='4e6')
+    plugin.add('config', key='vmax', value='0.05')
+    composite.add('joint', kind='main', damping=0.015)
+    composite.geom.type = 'capsule'
+    composite.geom.size = [0.005, 0, 0]
+    composite.geom.rgba = [0.8, 0.2, 0.1, 1]
+    composite.geom.condim = 1
+
+    physics = mjcf.Physics.from_mjcf_model(root)
+    physics.step()
+
+  def test_plugins_sdf(self):
+    root = mjcf.RootElement()
+    root.option.sdf_iterations = 10
+    root.option.sdf_initpoints = 40
+
+    extension = root.extension.add('plugin', plugin='mujoco.sdf.torus')
+    instance = extension.add('instance', name='torus')
+    instance.add('config', key='radius1', value='0.35')
+    instance.add('config', key='radius2', value='0.15')
+
+    # Replicate example in mujoco/model/plugin/elasticity/torus.xml
+    mesh = root.asset.add('mesh', name='torus')
+    mesh.add('plugin', instance='torus')
+
+    # Test we can add SDF geom to the worldbody.
+    worldbody_geom = root.worldbody.add(
+        'geom', type='sdf', mesh='torus', rgba=[.2, .2, .8, 1])
+    worldbody_geom.add('plugin', instance='torus')
+
+    # Test we can add SDF geom to a body.
+    body = root.worldbody.add('body', pos=[-1, 0, 3.8])
+    body.add('freejoint')
+    body_geom = body.add('geom', type='sdf', mesh='torus', rgba=[.2, .2, .8, 1])
+    body_geom.add('plugin', instance='torus')
+
+    physics = mjcf.Physics.from_mjcf_model(root)
+    physics.step()
 
 if __name__ == '__main__':
   absltest.main()
